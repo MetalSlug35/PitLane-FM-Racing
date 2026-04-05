@@ -1,0 +1,36 @@
+NRJ.m3u ; NRJ ; https://streaming.nrjaudio.fm/oumvmk8fnozc
+Skyrock.m3u ; Skyrock ; http://icecast.skyrock.net/s/natio_mp3_128k
+FIP.m3u ; Radio France (FIP) ; http://direct.fipradio.fr/live/fip-midfi.mp3
+FIP Jazz.m3u ; Radio France (FIP) ; http://direct.fipradio.fr/live/fip-webradio2.mp3
+FIP Rock.m3u ; Radio France (FIP) ; http://direct.fipradio.fr/live/fip-webradio1.mp3
+FIP Electro.m3u ; Radio France (FIP) ; http://direct.fipradio.fr/live/fip-webradio8.mp3
+Europe 1.m3u ; Europe 1 ; https://stream.europe1.fr/europe1.mp3
+France Culture.m3u ; Radio France ; http://direct.franceculture.fr/live/franceculture-midfi.mp3
+France Info.m3u ; Radio France ; http://direct.franceinfo.fr/live/franceinfo-midfi.mp3
+France Inter.m3u ; Radio France ; http://direct.franceinter.fr/live/franceinter-midfi.mp3
+France Musique.m3u ; Radio France ; http://direct.francemusique.fr/live/francemusique-midfi.mp3
+Fun Radio.m3u ; Fun Radio ; https://streaming.radio.funradio.fr/fun-1-44-128
+Mouv.m3u ; Radio France (Mouv') ; http://direct.mouv.fr/live/mouv-midfi.mp3
+RMC Talk.m3u ; BFM/RMC ; https://audio.bfmtv.com/rmcradio_128.mp3
+RTL.m3u ; RTL ; https://streaming.radio.rtl.fr/rtl-1-44-128
+RTL2.m3u ; RTL2 ; https://streaming.radio.rtl2.fr/rtl2-1-44-128
+Radio Swiss Classic.m3u ; SRG SSR ; https://stream.srg-ssr.ch/srgssr/rsc_de/mp3/128
+Radio Swiss Jazz.m3u ; SRG SSR ; https://stream.srg-ssr.ch/srgssr/rsj/mp3/128
+Radio Swiss Pop.m3u ; SRG SSR ; https://stream.srg-ssr.ch/srgssr/rsp/mp3/128
+SomaFM Beat Blender.m3u ; SomaFM ; http://ice6.somafm.com/beatblender-128-mp3
+SomaFM Boot Liquor.m3u ; SomaFM ; http://ice6.somafm.com/bootliquor-128-mp3
+SomaFM Deep Space One.m3u ; SomaFM ; http://ice6.somafm.com/deepspaceone-128-mp3
+SomaFM Drone Zone.m3u ; SomaFM ; http://ice6.somafm.com/dronezone-128-mp3
+SomaFM Folk Forward.m3u ; SomaFM ; http://ice6.somafm.com/folkfwd-128-mp3
+SomaFM Groove Salad.m3u ; SomaFM ; http://ice6.somafm.com/groovesalad-128-mp3
+SomaFM Indie Pop Rocks.m3u ; SomaFM ; http://ice6.somafm.com/indiepop-128-mp3
+SomaFM Left Coast 70s.m3u ; SomaFM ; http://ice6.somafm.com/seventies-128-mp3
+SomaFM Lush.m3u ; SomaFM ; http://ice6.somafm.com/lush-128-mp3
+SomaFM PopTron.m3u ; SomaFM ; http://ice6.somafm.com/poptron-128-mp3
+SomaFM Secret Agent.m3u ; SomaFM ; http://ice6.somafm.com/secretagent-128-mp3
+SomaFM Seven Inch Soul.m3u ; SomaFM ; http://ice6.somafm.com/7soul-128-mp3
+SomaFM Sonic Universe.m3u ; SomaFM ; http://ice6.somafm.com/sonicuniverse-128-mp3
+SomaFM Suburbs of Goa.m3u ; SomaFM ; http://ice6.somafm.com/suburbsofgoa-128-mp3
+SomaFM The Trip.m3u ; SomaFM ; http://ice6.somafm.com/thetrip-128-mp3
+SomaFM ThistleRadio.m3u ; SomaFM ; http://ice6.somafm.com/thistle-128-mp3
+SomaFM Underground 80s.m3u ; SomaFM ; http://ice6.somafm.com/u80s-128-mp3

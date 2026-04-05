@@ -9,6 +9,8 @@ Ce dossier contient uniquement :
 - `Nouvelle structure de dev Racing`
   - apps racing : `ACC`, `AMS2`, `LMU`, `ACE`
   - outils de build liés à la branche racing
+- `liste_m3u_Bloc11.txt`
+  - liste des radios intégrées avec leur nom de source et leur URL de flux
 
 Les répertoires de build, les binaires générés, les logs locaux et les installers compilés ont été retirés de cette version GitHub.
 
@@ -50,6 +52,12 @@ python ".\Nouvelle structure de dev Racing\Bloc12\ACC\compi.py"
 python ".\Nouvelle structure de dev Racing\Bloc12\AMS2\compi.py"
 python ".\Nouvelle structure de dev Racing\Bloc12\LMU\compi.py"
 ```
+
+## Radios intégrées
+
+Pour faciliter la review, la liste des fichiers `.m3u` embarqués et leurs sources de flux est fournie ici :
+
+- `liste_m3u_Bloc11.txt`
 
 ## Ce qui a été exclu
 
