@@ -1,0 +1,6 @@
+pygame>=2.6
+psutil>=6.0
+miniaudio>=1.61
+Pillow>=10.0
+comtypes>=1.4
+pyaccsharedmemory>=1.0

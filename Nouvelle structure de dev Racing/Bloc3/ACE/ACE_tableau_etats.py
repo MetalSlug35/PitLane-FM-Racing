@@ -1,0 +1,158 @@
+# =============================================================================
+#  Bloc3 — ACE_tableau_etats.py
+#  Tableau d'export des états ACE — compatible architecture modulaire.
+# =============================================================================
+
+TABLEAU_ETATS = [
+    {
+        "state_id":        "game_closed",
+        "label":           "Jeu fermé",
+        "politique":       "exit",
+        "source_detection": "Aucun processus assettocorsaevo.exe détecté.",
+        "shared_memory":   "N/A",
+        "log_signal":      "N/A",
+        "notes":           "Fermeture de l'app PitLane FM.",
+    },
+    {
+        "state_id":        "loading",
+        "label":           "Chargement",
+        "politique":       "stop",
+        "source_detection": "Processus présent, shared memory ACC-like indisponible ou invalide.",
+        "shared_memory":   "mapping_unavailable / invalid_shared_content",
+        "log_signal":      "N/A",
+        "notes":           "Phase transitoire au démarrage ACE.",
+    },
+    {
+        "state_id":        "menus",
+        "label":           "Menus",
+        "politique":       "stop",
+        "source_detection": "status=ACC_OFF + log.ui_page in [menu.html, singleplayer.html, intro.html]",
+        "shared_memory":   "ACC_OFF",
+        "log_signal":      "Last ui url loaded → page menu",
+        "notes":           "",
+    },
+    {
+        "state_id":        "paused",
+        "label":           "Pause",
+        "politique":       "hold",
+        "source_detection": "status=ACC_PAUSE ou ACC_OFF + route contient 'pause'",
+        "shared_memory":   "ACC_PAUSE / ACC_OFF",
+        "log_signal":      "Loading page route=pause*",
+        "notes":           "En entraînement, pause à vitesse < 3 km/h → musique_session_active=False.",
+    },
+    {
+        "state_id":        "setup_menu",
+        "label":           "Menu setup / garage",
+        "politique":       "stop",
+        "source_detection": "is_setup_menu_visible=True ou route contient 'pitlane'",
+        "shared_memory":   "ACC_LIVE",
+        "log_signal":      "route=pitlane*",
+        "notes":           "",
+    },
+    {
+        "state_id":        "pre_race",
+        "label":           "Grille / avant départ",
+        "politique":       "stop",
+        "source_detection": "session_phase in [waiting_for_players, start_countdown_lights_on…]",
+        "shared_memory":   "ACC_LIVE + ACC_RACE",
+        "log_signal":      "setSessionPhase waiting_for_players / start_countdown_*",
+        "notes":           "",
+    },
+    {
+        "state_id":        "race",
+        "label":           "En course",
+        "politique":       "play",
+        "source_detection": "session_phase in [session, overtime_*] ou ACC_LIVE + ACC_RACE",
+        "shared_memory":   "ACC_LIVE + ACC_RACE",
+        "log_signal":      "setSessionPhase session",
+        "notes":           "",
+    },
+    {
+        "state_id":        "qualifying",
+        "label":           "Qualifications",
+        "politique":       "play",
+        "source_detection": "ACC_LIVE + ACC_QUALIFY",
+        "shared_memory":   "ACC_LIVE + ACC_QUALIFY",
+        "log_signal":      "N/A",
+        "notes":           "",
+    },
+    {
+        "state_id":        "practice",
+        "label":           "Essais / Entraînement",
+        "politique":       "play",
+        "source_detection": "ACC_LIVE + ACC_PRACTICE",
+        "shared_memory":   "ACC_LIVE + ACC_PRACTICE",
+        "log_signal":      "N/A",
+        "notes":           "En mode practice, pause à vitesse nulle déclenche musique_session_active=False.",
+    },
+    {
+        "state_id":        "pit_lane",
+        "label":           "Voie des stands",
+        "politique":       "play",
+        "source_detection": "is_in_pit_lane=True",
+        "shared_memory":   "ACC_LIVE",
+        "log_signal":      "N/A",
+        "notes":           "",
+    },
+    {
+        "state_id":        "pit_stop",
+        "label":           "Stand",
+        "politique":       "play",
+        "source_detection": "is_in_pit=True + is_in_pit_lane=False",
+        "shared_memory":   "ACC_LIVE",
+        "log_signal":      "N/A",
+        "notes":           "",
+    },
+    {
+        "state_id":        "on_track",
+        "label":           "En piste (résiduel)",
+        "politique":       "play",
+        "source_detection": "ACC_LIVE + session non classifiée",
+        "shared_memory":   "ACC_LIVE",
+        "log_signal":      "N/A",
+        "notes":           "",
+    },
+    {
+        "state_id":        "replay",
+        "label":           "Replay",
+        "politique":       "stop",
+        "source_detection": "status=ACC_REPLAY",
+        "shared_memory":   "ACC_REPLAY",
+        "log_signal":      "N/A",
+        "notes":           "",
+    },
+    {
+        "state_id":        "unknown",
+        "label":           "Inconnu",
+        "politique":       "stop",
+        "source_detection": "Combinaison non classifiée.",
+        "shared_memory":   "*",
+        "log_signal":      "*",
+        "notes":           "",
+    },
+]
+
+POLITIQUE_MUSIQUE = {row["state_id"]: row["politique"] for row in TABLEAU_ETATS}
+
+EVENEMENTS = [
+    {
+        "event_id":   "garage_return_pause_menu",
+        "description": "paused → setup_menu/pit_lane/pit_stop",
+        "effet":      "Verrouille la musique jusqu'à vitesse > 3 km/h.",
+    },
+    {
+        "event_id":   "garage_return_direct",
+        "description": "setup_menu → pit_lane/menus",
+        "effet":      "Idem.",
+    },
+    {
+        "event_id":   "paused_at_rest",
+        "description": "Pause détectée à vitesse < 3 km/h (spécifique ACE entraînement).",
+        "effet":      "musique_session_active = False → nécessite redémarrage vitesse.",
+    },
+    {
+        "event_id":   "race_start",
+        "description": "green_flag détecté pendant race.",
+        "effet":      "Autorise la musique en course.",
+    },
+]

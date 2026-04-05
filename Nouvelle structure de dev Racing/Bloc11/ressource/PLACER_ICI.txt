@@ -1,0 +1,13 @@
+Ressources partagées à placer dans ce dossier :
+  - buy_me_a_coffee_logo.png   (logo Buy Me a Coffee, PNG transparent, ~200x56px)
+
+Ressources par jeu à placer dans Bloc11/XXX/ressource/ :
+  - ACC_PitLane_FM_icon.ico    → Bloc11/ACC/ressource/
+  - ACE_PitLane_FM_icon.ico    → Bloc11/ACE/ressource/
+  - AMS2_PitLane_FM_icon.ico   → Bloc11/AMS2/ressource/
+  - LMU_PitLane_FM_icon.ico    → Bloc11/LMU/ressource/
+
+Ces fichiers sont référencés par :
+  - Bloc12/XXX/ressource/XXX_PitLane_FM.spec      (datas PyInstaller)
+  - Bloc12/XXX/ressource/XXX_Configurateur.spec   (datas PyInstaller)
+  - Bloc12/XXX/ressource/XXX_PitLane_FM.iss       (Source Inno Setup)
