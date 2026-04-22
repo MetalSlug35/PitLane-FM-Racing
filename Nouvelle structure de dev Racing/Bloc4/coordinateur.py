@@ -230,7 +230,8 @@ class Coordinateur:
                 politique = self._politique(etat_id)
                 force_stop_music = bool(etat.get("forceStopMusic", False))
 
-                shortcuts.autoriser(politique == "play")
+                shortcuts_allowed = etat.get("shortcutsAllowed", politique == "play")
+                shortcuts.autoriser(bool(shortcuts_allowed) and politique == "play")
 
                 if politique == "exit":
                     break

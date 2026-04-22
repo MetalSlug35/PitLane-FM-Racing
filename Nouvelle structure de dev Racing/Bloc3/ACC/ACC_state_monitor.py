@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 import atexit
+import time
 import psutil
 
 from pyaccsharedmemory import (
@@ -40,6 +41,18 @@ from pyaccsharedmemory import (
 )
 
 ACC_EXE_NAMES = frozenset(("acc.exe", "ac2-win64-shipping.exe"))
+MOTION_GATED_STATES = frozenset((
+    "qualifying",
+    "practice",
+    "hotlap",
+    "hotstint",
+    "time_attack",
+    "pit_lane",
+    "pit_stop",
+    "on_track",
+))
+MOTION_GATE_BLOCK_SECONDS = 2.0
+MOTION_GATE_SPEED_KPH = 5.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +99,22 @@ class _SharedMemSource:
 _SRC = _SharedMemSource()
 atexit.register(_SRC.close)
 
+_motion_gate_active = False
+_motion_gate_block_until = 0.0
+_motion_gate_session_key = ""
+_motion_gate_last_time_ms = 0
+_motion_gate_last_time_left = 0.0
+
+
+def _reset_motion_gate() -> None:
+    global _motion_gate_active, _motion_gate_block_until, _motion_gate_session_key
+    global _motion_gate_last_time_ms, _motion_gate_last_time_left
+    _motion_gate_active = False
+    _motion_gate_block_until = 0.0
+    _motion_gate_session_key = ""
+    _motion_gate_last_time_ms = 0
+    _motion_gate_last_time_left = 0.0
+
 
 def _safe_enum(v) -> str:
     return getattr(v, "name", str(v))
@@ -130,8 +159,11 @@ def _classify(proc, shm: dict | None, error: str) -> dict:
     snap["sessionState"] = _safe_enum(gr.session_type)
     snap["speedKph"]     = float(getattr(ph, "speed_kmh", 0.0) or 0.0)
     snap["currentTimeMs"] = int(gr.current_time)
+    snap["sessionTimeLeft"] = float(getattr(gr, "session_time_left", 0.0) or 0.0)
     snap["rawNormalizedCarPosition"] = float(gr.normalized_car_position)
     snap["flagColour"]   = _safe_enum(gr.flag)
+    snap["_rawTrack"] = str(getattr(shm["static"], "track", "") or "")
+    snap["_rawCarModel"] = str(getattr(shm["static"], "car_model", "") or "")
     snap["raceState"]    = ""
 
     if gr.is_in_pit_lane:
@@ -228,6 +260,94 @@ def _infer_events(snap: dict, precedent: dict | None) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 #  API PUBLIQUE
 # ─────────────────────────────────────────────────────────────────────────────
+def _apply_motion_gate(snap: dict, precedent: dict | None) -> dict:
+    """Bloque les modes hors course jusqu'a 2 s + premier vrai mouvement."""
+    global _motion_gate_active, _motion_gate_block_until, _motion_gate_session_key
+    global _motion_gate_last_time_ms, _motion_gate_last_time_left
+
+    raw_state = snap.get("stateId", "unknown")
+    snap["_rawStateId"] = raw_state
+
+    if raw_state in {"game_closed", "loading", "menus", "setup_menu", "pre_race", "race", "replay", "unknown"}:
+        _reset_motion_gate()
+        return snap
+
+    if raw_state == "paused":
+        return snap
+
+    if raw_state in {"pit_lane", "pit_stop"} and snap.get("sessionState") == "ACC_RACE":
+        _reset_motion_gate()
+        return snap
+
+    if raw_state not in MOTION_GATED_STATES:
+        _reset_motion_gate()
+        return snap
+
+    session_key = "|".join((
+        str(snap.get("sessionState", "") or ""),
+        str(snap.get("_rawTrack", "") or ""),
+        str(snap.get("_rawCarModel", "") or ""),
+    ))
+    current_time_ms = int(snap.get("currentTimeMs", 0) or 0)
+    session_time_left = float(snap.get("sessionTimeLeft", 0.0) or 0.0)
+    previous_state = str(precedent.get("stateId", "") or "") if precedent else ""
+
+    session_changed = bool(_motion_gate_session_key and session_key != _motion_gate_session_key)
+    timer_rollback = (
+        _motion_gate_last_time_ms > 5000
+        and current_time_ms >= 0
+        and current_time_ms + 3000 < _motion_gate_last_time_ms
+    )
+    timer_restarted_from_stop = (
+        previous_state in {"menus", "loading", "setup_menu", "pre_race", "paused"}
+        and current_time_ms <= 3000
+        and _motion_gate_last_time_ms > 8000
+    )
+    time_left_jump = (
+        _motion_gate_last_time_left > 0.0
+        and session_time_left > 0.0
+        and session_time_left > _motion_gate_last_time_left + 30.0
+    )
+
+    if session_changed or timer_rollback or timer_restarted_from_stop or time_left_jump:
+        _motion_gate_active = False
+        _motion_gate_block_until = 0.0
+        snap["forceStopMusic"] = True
+        snap.setdefault("signals", []).append("motion_gate_session_reset")
+
+    _motion_gate_session_key = session_key
+    _motion_gate_last_time_ms = current_time_ms
+    _motion_gate_last_time_left = session_time_left
+
+    if _motion_gate_active:
+        return snap
+
+    now = time.monotonic()
+    if _motion_gate_block_until <= 0.0:
+        _motion_gate_block_until = now + MOTION_GATE_BLOCK_SECONDS
+        snap.setdefault("signals", []).append("motion_gate_armed")
+
+    if now < _motion_gate_block_until:
+        snap["stateId"] = "pre_race"
+        snap["stateLabel"] = "Attente mouvement"
+        snap.setdefault("signals", []).append("motion_gate_block")
+        snap["signals"] = sorted(set(snap["signals"]))
+        return snap
+
+    if float(snap.get("speedKph", 0.0) or 0.0) >= MOTION_GATE_SPEED_KPH:
+        _motion_gate_active = True
+        _motion_gate_block_until = 0.0
+        snap.setdefault("signals", []).append("motion_gate_released")
+        snap["signals"] = sorted(set(snap["signals"]))
+        return snap
+
+    snap["stateId"] = "pre_race"
+    snap["stateLabel"] = "Attente mouvement"
+    snap.setdefault("signals", []).append("motion_gate_wait_speed")
+    snap["signals"] = sorted(set(snap["signals"]))
+    return snap
+
+
 def find_process():
     """Retourne le psutil.Process ACC ou None."""
     for proc in psutil.process_iter(["pid", "name"]):
@@ -244,4 +364,5 @@ def get_state(precedent: dict | None = None) -> dict:
     proc = find_process()
     shm, err = _SRC.read()
     snap = _classify(proc, shm, err)
-    return _infer_events(snap, precedent)
+    snap = _infer_events(snap, precedent)
+    return _apply_motion_gate(snap, precedent)

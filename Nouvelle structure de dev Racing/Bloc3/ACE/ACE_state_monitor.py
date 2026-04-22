@@ -49,6 +49,9 @@ except Exception:
 
 
 ACE_EXE_NAMES = frozenset(("assettocorsaevo.exe",))
+ACE_LOG_DIRECTORIES = (
+    Path.home() / "Saved Games" / "ACE" / "Logs",
+)
 ACE_LOG_CANDIDATES = (
     Path.home() / "Saved Games" / "ACE" / "log.txt",
     Path.home() / "Documents" / "ACE" / "log.txt",
@@ -85,8 +88,25 @@ _LOADING_PAGE_RE  = re.compile(
 )
 _TRACK_RE         = re.compile(r"Creating physics track:\s*(?P<track>.+?)\s*$", re.IGNORECASE)
 _SESSION_PHASE_RE = re.compile(r"setSessionPhase\s+(?P<phase>[A-Za-z0-9_]+)", re.IGNORECASE)
+_GAME_STARTED_RE  = re.compile(r"Game Started!\s+(?P<mode>GameModeType_[A-Za-z0-9_]+)", re.IGNORECASE)
+_GOTO_RE          = re.compile(
+    r"\b(?P<verb>goto_loadingpage|goto_origin|goto)\s+(?P<target>[^\s]+)",
+    re.IGNORECASE,
+)
+_PITLANE_CAR_RE   = re.compile(
+    r"Car\s+(?P<car>[A-Za-z0-9_-]+)\s+(?P<action>entered|exited)\s+to pitlane",
+    re.IGNORECASE,
+)
+_REMOTE_SESSION_RE = re.compile(
+    r"(?P<remote>TimeAttackRemote|RaceRemote)\s+(?P<kind>[A-Za-z]+)\s+created",
+    re.IGNORECASE,
+)
+_RACE_STARTED_RE = re.compile(
+    r"Car\s+(?P<car>[A-Za-z0-9_-]+)\s+has started the race!",
+    re.IGNORECASE,
+)
 
-MENU_PAGES         = ("menu.html", "singleplayer.html", "intro.html")
+MENU_PAGES         = ("menu.html", "singleplayer.html", "multiplayer.html", "intro.html")
 PAUSE_ROUTE_TOKENS = ("pause",)
 PIT_ROUTE_TOKENS   = ("pitlane",)
 PRE_RACE_PHASES    = {
@@ -290,6 +310,15 @@ class _ACELogTracker:
 
     def _resolve_path(self) -> Path:
         existing = []
+        for directory in ACE_LOG_DIRECTORIES:
+            try:
+                if not directory.exists():
+                    continue
+                for candidate in directory.glob("log-*.txt"):
+                    if candidate.is_file():
+                        existing.append((candidate.stat().st_mtime, candidate))
+            except Exception:
+                pass
         for candidate in self._paths:
             try:
                 if candidate.exists():
@@ -306,15 +335,28 @@ class _ACELogTracker:
             "current_ui_page":              "",
             "current_ui_route":             "",
             "current_ui_ts":                0.0,
+            "pause_menu_open":              False,
             "last_loading_page":            "",
             "last_loading_route":           "",
             "last_loading_ts":              0.0,
+            "last_game_started_ts":         0.0,
+            "last_game_mode":               "",
+            "last_session_kind":            "",
             "last_session_start_ts":        0.0,
             "last_pitlane_ts":              0.0,
             "last_replay_ts":               0.0,
             "last_menu_ts":                 0.0,
             "last_pause_ts":                0.0,
             "last_hud_ts":                  0.0,
+            "last_resume_ts":               0.0,
+            "last_request_start_ts":        0.0,
+            "last_request_exit_ts":         0.0,
+            "last_request_back_to_pit_ts":  0.0,
+            "last_request_restart_ts":      0.0,
+            "last_request_next_session_ts": 0.0,
+            "last_request_terminate_ts":    0.0,
+            "last_request_quit_ts":         0.0,
+            "last_hard_stop_request_ts":    0.0,
             "last_track_name":              "",
             "last_track_ts":                0.0,
             "last_grid_ts":                 0.0,
@@ -325,6 +367,11 @@ class _ACELogTracker:
             "last_session_phase_ts":        0.0,
             "last_session_live_ts":         0.0,
             "last_split_ts":                0.0,
+            "player_car_id":                "",
+            "last_player_pit_entry_ts":     0.0,
+            "last_player_pit_exit_ts":      0.0,
+            "last_player_race_started_ts":  0.0,
+            "session_live_latched":         False,
         }
 
     def _update_sig(self, proc) -> None:
@@ -381,6 +428,45 @@ class _ACELogTracker:
         ts      = time.time()
         lowered = line.lower()
 
+        m = _GAME_STARTED_RE.search(line)
+        if m:
+            self.state["last_game_started_ts"] = ts
+            self.state["last_game_mode"] = m.group("mode").strip()
+            self.state["last_session_start_ts"] = ts
+            self.state["last_loading_ts"] = ts
+            self.state["last_session_live_ts"] = 0.0
+            self.state["last_split_ts"] = 0.0
+            self.state["last_lights_off_ts"] = 0.0
+
+        m = _GOTO_RE.search(line)
+        if m:
+            verb = m.group("verb").lower()
+            target = m.group("target").strip()
+            page, _, route = target.partition(",")
+            page = page.strip().lstrip("/")
+            route = route.strip()
+            if verb == "goto_loadingpage":
+                self.state["last_loading_page"] = ""
+                self.state["last_loading_route"] = page.lower()
+                self.state["last_loading_ts"] = ts
+            else:
+                self.state["current_ui_page"] = page
+                self.state["current_ui_route"] = route
+                self.state["current_ui_ts"] = ts
+                if page == "hud.html":
+                    self.state["last_hud_ts"] = ts
+                    self.state["last_resume_ts"] = ts
+                    self.state["pause_menu_open"] = False
+                elif page == "ingame.html" and any(t in route.lower() for t in PAUSE_ROUTE_TOKENS):
+                    self.state["last_pause_ts"] = ts
+                    self.state["pause_menu_open"] = True
+                elif page == "ingame.html" and any(t in route.lower() for t in PIT_ROUTE_TOKENS):
+                    self.state["last_pitlane_ts"] = ts
+                elif page in MENU_PAGES or page == "settings.html":
+                    self.state["last_menu_ts"] = ts
+                    if page == "settings.html":
+                        self.state["pause_menu_open"] = True
+
         m = _LAST_UI_RE.search(line)
         if m:
             page = m.group("page").strip().lstrip("/")
@@ -390,10 +476,14 @@ class _ACELogTracker:
             self.state["current_ui_route"] = route
             if page == "hud.html":
                 self.state["last_hud_ts"] = ts
+                self.state["pause_menu_open"] = False
             elif page == "ingame.html" and any(t in route for t in PAUSE_ROUTE_TOKENS):
                 self.state["last_pause_ts"] = ts
+                self.state["pause_menu_open"] = True
             elif page in MENU_PAGES or page == "settings.html":
                 self.state["last_menu_ts"] = ts
+                if page == "settings.html":
+                    self.state["pause_menu_open"] = True
 
         m = _LOADING_PAGE_RE.search(line)
         if m:
@@ -406,6 +496,7 @@ class _ACELogTracker:
                 self.state["last_menu_ts"] = ts
             if page == "ingame.html" and any(t in route for t in PAUSE_ROUTE_TOKENS):
                 self.state["last_pause_ts"] = ts
+                self.state["pause_menu_open"] = True
 
         m = _TRACK_RE.search(line)
         if m:
@@ -423,6 +514,9 @@ class _ACELogTracker:
                 # de course pour ne pas autoriser la musique trop tôt.
                 self.state["last_session_live_ts"] = 0.0
                 self.state["last_split_ts"] = 0.0
+                self.state["last_player_pit_exit_ts"] = 0.0
+                self.state["last_player_race_started_ts"] = 0.0
+                self.state["session_live_latched"] = False
             if pl == "start_countdown_no_lights":
                 self.state["last_countdown_no_lights_ts"] = ts
             elif pl == "start_countdown_lights_on":
@@ -431,6 +525,7 @@ class _ACELogTracker:
                 self.state["last_lights_off_ts"] = ts
             elif pl in RACE_RELEASE_PHASES:
                 self.state["last_session_live_ts"] = ts
+                self.state["session_live_latched"] = True
 
         if "starting session" in lowered:
             self.state["last_session_start_ts"] = ts
@@ -438,6 +533,100 @@ class _ACELogTracker:
             self.state["last_session_live_ts"]   = 0.0
             self.state["last_split_ts"]          = 0.0
             self.state["last_lights_off_ts"]     = 0.0
+            self.state["player_car_id"]          = ""
+            self.state["last_player_pit_entry_ts"] = 0.0
+            self.state["last_player_pit_exit_ts"] = 0.0
+            self.state["last_player_race_started_ts"] = 0.0
+            self.state["session_live_latched"] = False
+
+        if "request made gamemoderequeststart" in lowered or "gamemoderequeststart" in lowered:
+            self.state["last_request_start_ts"] = ts
+            self.state["last_session_phase"] = ""
+            self.state["last_session_live_ts"] = 0.0
+            self.state["last_split_ts"] = 0.0
+            self.state["last_lights_off_ts"] = 0.0
+            self.state["last_player_pit_exit_ts"] = 0.0
+            self.state["last_player_race_started_ts"] = 0.0
+            kind = str(self.state.get("last_session_kind", "")).lower()
+            self.state["session_live_latched"] = bool(kind and kind != "race")
+
+        if "request made gamemoderequestpause" in lowered or "gamemoderequestpause" in lowered or "pausemenu show" in lowered:
+            self.state["last_pause_ts"] = ts
+            self.state["pause_menu_open"] = True
+
+        if "request made gamemoderequestresume" in lowered or "gamemoderequestresume" in lowered or "hudpausemenu: resume" in lowered:
+            self.state["last_resume_ts"] = ts
+            self.state["last_hud_ts"] = ts
+            self.state["pause_menu_open"] = False
+
+        if "gamemoderequestbacktopit" in lowered:
+            self.state["last_request_back_to_pit_ts"] = ts
+            self.state["last_hard_stop_request_ts"] = ts
+            self.state["last_request_start_ts"] = 0.0
+            self.state["last_pitlane_ts"] = ts
+            self.state["last_session_phase"] = ""
+            self.state["last_session_live_ts"] = 0.0
+            self.state["last_split_ts"] = 0.0
+            self.state["last_lights_off_ts"] = 0.0
+            self.state["last_player_pit_exit_ts"] = 0.0
+            self.state["last_player_race_started_ts"] = 0.0
+            self.state["session_live_latched"] = False
+
+        if "gamemoderequestrestartsession" in lowered:
+            self.state["last_request_restart_ts"] = ts
+            self.state["last_hard_stop_request_ts"] = ts
+            self.state["last_request_start_ts"] = 0.0
+            self.state["last_pitlane_ts"] = ts
+            self.state["last_session_phase"] = ""
+            self.state["last_session_live_ts"] = 0.0
+            self.state["last_split_ts"] = 0.0
+            self.state["last_lights_off_ts"] = 0.0
+            self.state["last_player_pit_exit_ts"] = 0.0
+            self.state["last_player_race_started_ts"] = 0.0
+            self.state["session_live_latched"] = False
+
+        if "gamemoderequestnextsession" in lowered:
+            self.state["last_request_next_session_ts"] = ts
+            self.state["last_hard_stop_request_ts"] = ts
+            self.state["last_request_start_ts"] = 0.0
+            self.state["last_loading_ts"] = ts
+            self.state["last_session_phase"] = ""
+            self.state["last_session_live_ts"] = 0.0
+            self.state["last_split_ts"] = 0.0
+            self.state["last_lights_off_ts"] = 0.0
+            self.state["last_player_pit_exit_ts"] = 0.0
+            self.state["last_player_race_started_ts"] = 0.0
+            self.state["session_live_latched"] = False
+
+        if "gamemoderequestterminatesession" in lowered:
+            self.state["last_request_terminate_ts"] = ts
+            self.state["last_hard_stop_request_ts"] = ts
+            self.state["last_request_start_ts"] = 0.0
+            self.state["last_pitlane_ts"] = ts
+            self.state["last_session_phase"] = ""
+            self.state["last_session_live_ts"] = 0.0
+            self.state["last_split_ts"] = 0.0
+            self.state["last_lights_off_ts"] = 0.0
+            self.state["last_player_pit_exit_ts"] = 0.0
+            self.state["last_player_race_started_ts"] = 0.0
+            self.state["session_live_latched"] = False
+
+        if "gamemoderequestquitgame" in lowered:
+            self.state["last_request_quit_ts"] = ts
+            self.state["last_menu_ts"] = ts
+
+        if (
+            "request made gamemoderequestexit" in lowered
+            or "gamemoderequestexit" in lowered
+            or "gamemode not found, redirect to the menu" in lowered
+            or "sharedmemoryphysicswriter::~sharedmemoryphysicswriter" in lowered
+        ):
+            self.state["last_request_exit_ts"] = ts
+            self.state["last_menu_ts"] = ts
+            self.state["current_ui_page"] = "menu.html"
+            self.state["current_ui_route"] = "main/main"
+            self.state["session_live_latched"] = False
+            self.state["pause_menu_open"] = False
 
         if (
             "showloadingmodal" in lowered
@@ -449,14 +638,52 @@ class _ACELogTracker:
         ):
             self.state["last_loading_ts"] = ts
 
-        if "exited to pitlane" in lowered:
-            self.state["last_pitlane_ts"] = ts
+        m = _REMOTE_SESSION_RE.search(line)
+        if m:
+            self.state["last_session_kind"] = m.group("kind").strip()
+            if m.group("remote").lower() == "raceremote":
+                self.state["last_session_phase"] = ""
+                self.state["last_session_live_ts"] = 0.0
+                self.state["last_split_ts"] = 0.0
+                self.state["last_lights_off_ts"] = 0.0
+                self.state["last_player_pit_exit_ts"] = 0.0
+                self.state["last_player_race_started_ts"] = 0.0
+                self.state["session_live_latched"] = False
+
+        m = _PITLANE_CAR_RE.search(line)
+        if m:
+            car_id = m.group("car").strip()
+            action = m.group("action").lower()
+            if not self.state.get("player_car_id"):
+                self.state["player_car_id"] = car_id
+            if car_id == self.state.get("player_car_id"):
+                if action == "entered":
+                    self.state["last_pitlane_ts"] = ts
+                    self.state["last_player_pit_entry_ts"] = ts
+                elif action == "exited":
+                    self.state["last_player_pit_exit_ts"] = ts
+                    if str(self.state.get("last_session_kind", "")).lower() != "race":
+                        self.state["last_session_live_ts"] = ts
+                        self.state["last_split_ts"] = ts
+                        self.state["session_live_latched"] = True
+
+        m = _RACE_STARTED_RE.search(line)
+        if m:
+            car_id = m.group("car").strip()
+            if not self.state.get("player_car_id"):
+                self.state["player_car_id"] = car_id
+            if car_id == self.state.get("player_car_id"):
+                self.state["last_player_race_started_ts"] = ts
+                self.state["last_session_live_ts"] = ts
+                self.state["last_split_ts"] = ts
+                self.state["session_live_latched"] = True
 
         if "race grid:" in lowered or "startingpositiontype_grid" in lowered:
             self.state["last_grid_ts"] = ts
 
         if "[gameplay]" in lowered and "on split" in lowered:
             self.state["last_split_ts"] = ts
+            self.state["session_live_latched"] = True
 
         if "[replay]" in lowered or "replay saved" in lowered or "saving replay" in lowered:
             self.state["last_replay_ts"] = ts
@@ -469,6 +696,8 @@ class _ACELogTracker:
             or "last ui url loaded coui://uiresources/intro.html" in lowered
         ):
             self.state["last_menu_ts"] = ts
+            self.state["session_live_latched"] = False
+            self.state["pause_menu_open"] = False
 
     def poll(self, proc) -> dict:
         self._update_sig(proc)
@@ -562,6 +791,9 @@ def _should_reset_gate(precedent: dict | None, merged: dict) -> bool:
     current_signals = set(merged.get("signals", []))
 
     if current_state in {"game_closed", "loading", "menus", "setup_menu", "replay"}:
+        return True
+
+    if {"session_reset_log", "session_change_log"} & current_signals:
         return True
 
     current_track = str(merged.get("track", "") or "").strip().lower()
@@ -719,8 +951,21 @@ def _build_log_snapshot(log: dict) -> dict:
     loading_recent      = _recent(log.get("last_loading_ts", 0.0), 8.0)
     pitlane_recent      = _recent(log.get("last_pitlane_ts", 0.0), 12.0)
     replay_recent       = _recent(log.get("last_replay_ts", 0.0), 8.0)
-    session_recent      = _recent(log.get("last_session_start_ts", 0.0), 900.0)
+    session_recent      = (
+        _recent(log.get("last_session_start_ts", 0.0), 900.0)
+        or _recent(log.get("last_game_started_ts", 0.0), 900.0)
+    )
     pause_recent        = _recent(log.get("last_pause_ts", 0.0), 4.0)
+    request_start_recent = _recent(log.get("last_request_start_ts", 0.0), 30.0)
+    resume_recent       = _recent(log.get("last_resume_ts", 0.0), 8.0)
+    pit_reset_recent    = (
+        _recent(log.get("last_request_back_to_pit_ts", 0.0), 8.0)
+        or _recent(log.get("last_request_restart_ts", 0.0), 8.0)
+    )
+    session_change_recent = (
+        _recent(log.get("last_request_next_session_ts", 0.0), 12.0)
+        or _recent(log.get("last_request_terminate_ts", 0.0), 12.0)
+    )
     grid_recent         = _recent(log.get("last_grid_ts", 0.0), 180.0)
     countdown_recent    = (
         _recent(log.get("last_countdown_no_lights_ts", 0.0), 120.0)
@@ -729,20 +974,70 @@ def _build_log_snapshot(log: dict) -> dict:
     lights_off_recent   = _recent(log.get("last_lights_off_ts", 0.0), 8.0)
     session_live_recent = _recent(log.get("last_session_live_ts", 0.0), 20.0)
     split_recent        = _recent(log.get("last_split_ts", 0.0), 30.0)
+    player_pit_exit_recent = _recent(log.get("last_player_pit_exit_ts", 0.0), 30.0)
+    player_race_started_recent = _recent(log.get("last_player_race_started_ts", 0.0), 30.0)
+    hard_stop_recent = _recent(log.get("last_hard_stop_request_ts", 0.0), 45.0)
+    session_live_latched = bool(log.get("session_live_latched", False))
 
     session_phase   = str(log.get("last_session_phase", "") or "").lower()
+    session_kind    = str(log.get("last_session_kind", "") or "").lower()
+    loading_route   = str(log.get("last_loading_route", "") or "").lower()
+    is_race_session = session_kind == "race" or loading_route == "race"
     pre_race_phase  = session_phase in PRE_RACE_PHASES
-    race_release    = session_phase in RACE_RELEASE_PHASES or session_live_recent or split_recent
-    pre_race_active = (grid_recent or countdown_recent or pre_race_phase) and not race_release
+    if is_race_session:
+        race_release = (
+            session_phase in RACE_RELEASE_PHASES
+            or session_live_latched
+            or player_race_started_recent
+            or split_recent
+        )
+        race_session_started = request_start_recent or grid_recent or countdown_recent or pre_race_phase
+    else:
+        race_release = (
+            session_live_latched
+            or session_phase in RACE_RELEASE_PHASES
+            or session_live_recent
+            or request_start_recent
+            or resume_recent
+            or split_recent
+            or player_pit_exit_recent
+        )
+        race_session_started = False
+    pre_race_active = (
+        (grid_recent or countdown_recent or pre_race_phase or (is_race_session and race_session_started))
+        and not race_release
+    )
     track_active    = race_release or (lights_off_recent and session_live_recent) or split_recent
-    if page == "hud.html":
+    hard_stop_active = hard_stop_recent and not race_release
+    race_start_pending = bool(is_race_session and race_session_started and not race_release)
+    pre_race_signals = ["pre_race_log"] + (
+        ["race_start_pending_log", "session_reset_log"] if race_start_pending else []
+    )
+    if hard_stop_active:
+        snap["status"] = "ACE_LIVE"
+        snap["is_in_pit_lane"] = True
+        snap["state_id"], snap["state_label"] = "pre_race", "Stand / attente depart"
+        snap["signals"] = ["hard_stop_log", "pit_lane_log", "session_reset_log", "pre_race_log"]
+
+    elif session_change_recent and not request_start_recent:
+        snap["status"] = "ACE_LOADING"
+        snap["state_id"], snap["state_label"] = "loading", "Changement de session"
+        snap["signals"] = ["session_change_log", "loading_log"]
+
+    elif pit_reset_recent and not request_start_recent:
+        snap["status"] = "ACE_LIVE"
+        snap["is_in_pit_lane"] = True
+        snap["state_id"], snap["state_label"] = "pre_race", "Stand / attente depart"
+        snap["signals"] = ["pit_lane_log", "session_reset_log", "pre_race_log"]
+
+    elif page == "hud.html":
         snap["status"] = "ACE_LIVE"
         if pre_race_active:
             snap["state_id"], snap["state_label"] = "pre_race", "Grille / avant départ"
-            snap["signals"] = ["hud_page", "pre_race_log"]
+            snap["signals"] = ["hud_page"] + pre_race_signals
         else:
             snap["state_id"], snap["state_label"] = "on_track", "En session"
-            snap["signals"] = ["hud_page"] + (["race_release_log"] if track_active else [])
+            snap["signals"] = ["hud_page"] + (["race_release_log"] if track_active else []) + (["player_pit_exit_log"] if player_pit_exit_recent and not is_race_session else []) + (["race_started_log"] if player_race_started_recent else [])
 
     elif page == "ingame.html":
         snap["status"] = "ACE_LIVE"
@@ -753,17 +1048,17 @@ def _build_log_snapshot(log: dict) -> dict:
             snap["is_in_pit_lane"] = True
             if pre_race_active:
                 snap["state_id"], snap["state_label"] = "pre_race", "Grille / avant départ"
-                snap["signals"] = ["pit_lane_page", "pre_race_log"]
+                snap["signals"] = ["pit_lane_page"] + pre_race_signals
             else:
                 snap["state_id"], snap["state_label"] = "pit_lane", "Voie des stands"
-                snap["signals"] = ["pit_lane_page"] + (["race_release_log"] if track_active else [])
+                snap["signals"] = ["pit_lane_page"] + (["race_release_log"] if track_active else []) + (["player_pit_exit_log"] if player_pit_exit_recent and not is_race_session else []) + (["race_started_log"] if player_race_started_recent else [])
         else:
             if pre_race_active:
                 snap["state_id"], snap["state_label"] = "pre_race", "Grille / avant départ"
-                snap["signals"] = ["ingame_page", "pre_race_log"]
+                snap["signals"] = ["ingame_page"] + pre_race_signals
             else:
                 snap["state_id"], snap["state_label"] = "on_track", "En session"
-                snap["signals"] = ["ingame_page"] + (["race_release_log"] if track_active else [])
+                snap["signals"] = ["ingame_page"] + (["race_release_log"] if track_active else []) + (["player_pit_exit_log"] if player_pit_exit_recent and not is_race_session else []) + (["race_started_log"] if player_race_started_recent else [])
 
     elif page == "settings.html":
         if session_recent:
@@ -794,14 +1089,14 @@ def _build_log_snapshot(log: dict) -> dict:
         snap["status"] = "ACE_LIVE"
         if pre_race_active:
             snap["state_id"], snap["state_label"] = "pre_race", "Grille / avant départ"
-            snap["signals"] = ["session_log", "pre_race_log"]
+            snap["signals"] = ["session_log"] + pre_race_signals
         elif pitlane_recent:
             snap["is_in_pit_lane"] = True
             snap["state_id"], snap["state_label"] = "pit_lane", "Voie des stands"
-            snap["signals"] = ["pit_lane_log"] + (["race_release_log"] if track_active else [])
+            snap["signals"] = ["pit_lane_log"] + (["race_release_log"] if track_active else []) + (["player_pit_exit_log"] if player_pit_exit_recent and not is_race_session else []) + (["race_started_log"] if player_race_started_recent else [])
         else:
             snap["state_id"], snap["state_label"] = "on_track", "En session"
-            snap["signals"] = ["session_log"] + (["race_release_log"] if track_active else [])
+            snap["signals"] = ["session_log"] + (["race_release_log"] if track_active else []) + (["player_pit_exit_log"] if player_pit_exit_recent and not is_race_session else []) + (["race_started_log"] if player_race_started_recent else [])
 
     snap["signals"] = sorted(set(snap["signals"]))
     return snap
@@ -816,6 +1111,20 @@ def _merge(shm_snap: dict, log_snap: dict) -> dict:
     shm_id  = shm_snap.get("state_id", "unknown")
     shm_sig = set(shm_snap.get("signals", []))
     log_sig = set(log_snap.get("signals", []))
+    shm_status = str(shm_snap.get("status", "") or "").upper()
+    log_status = str(log_snap.get("status", "") or "").upper()
+
+    # Depuis certaines MAJ ACE, la shared memory ACC-like peut rester sur
+    # ACC_OFF alors que l'UI/log indique une session active. Dans ce cas, la
+    # vitesse n'est pas fiable, mais l'etat de session du log l'est.
+    if (
+        shm_status in {"ACC_OFF", "", "ACE_OFF"}
+        and log_status in {"ACE_LIVE", "ACE_PAUSE", "ACE_LOADING", "ACE_REPLAY"}
+        and log_id not in {"unknown"}
+    ):
+        merged = dict(log_snap)
+        merged["signals"] = sorted(shm_sig | log_sig)
+        return merged
 
     blocking = {"menus", "loading", "pre_race", "paused", "replay", "setup_menu"}
     if log_id in blocking:
@@ -966,17 +1275,24 @@ def _apply_gate(state_id: str, speed_kph: float, session_type: str,
     effective_speed_kph = max(float(speed_kph or 0.0), float(latched_max_speed_kmh or 0.0))
     effective_current_time_ms = max(_safe_int(current_time_ms), _safe_int(latched_current_time_ms))
     current_release_speed_seen = bool(float(speed_kph or 0.0) >= 5.0)
+    log_release_seen = bool(
+        "player_pit_exit_log" in signals
+        or "race_started_log" in signals
+        or "race_release_log" in signals
+    )
     if _require_current_release_speed:
-        effective_release_speed_seen = current_release_speed_seen
+        effective_release_speed_seen = current_release_speed_seen or log_release_seen
     else:
         effective_release_speed_seen = bool(
             latched_release_speed_seen
             or effective_speed_kph >= 5.0
+            or log_release_seen
         )
     effective_movement_seen = bool(
         latched_movement_seen
         or effective_speed_kph >= 5.0
         or float(latched_max_normalized_delta or 0.0) >= 0.0015
+        or log_release_seen
     )
 
     # ── Mise à jour depart_course_valide (seulement en session ACC_RACE) ─────
@@ -1134,7 +1450,12 @@ def get_state(precedent: dict | None = None) -> dict:
     # Inférence d'événements (enrichit result avec events, raceStartInferred…)
     _infer_events(result, precedent)
 
-    force_reset_transition = "session_restart_pause_menu" in set(result.get("events", []))
+    result_signals = set(result.get("signals", []))
+    force_reset_transition = (
+        "session_restart_pause_menu" in set(result.get("events", []))
+        or "session_reset_log" in result_signals
+        or "session_change_log" in result_signals
+    )
     if force_reset_transition:
         _reset_gate_flags()
         _clear_latched_fields(merged)
@@ -1175,5 +1496,25 @@ def get_state(precedent: dict | None = None) -> dict:
     result["stateId"] = effective_id
     if effective_id == "pre_race":
         result["stateLabel"] = "Grille / avant départ"
+
+    current_page = str(log.get("current_ui_page", "") or "").strip().lstrip("/").lower()
+    current_route = str(log.get("current_ui_route", "") or "").lower()
+    pause_menu_active = (
+        bool(log.get("pause_menu_open", False))
+        or
+        (current_page == "ingame.html" and any(t in current_route for t in PAUSE_ROUTE_TOKENS))
+        or (
+            current_page == "settings.html"
+            and (
+                _recent(log.get("last_session_start_ts", 0.0), 900.0)
+                or _recent(log.get("last_game_started_ts", 0.0), 900.0)
+            )
+        )
+        or (
+            _recent(log.get("last_pause_ts", 0.0), 6.0)
+            and not _recent(log.get("last_resume_ts", 0.0), 1.5)
+        )
+    )
+    result["shortcutsAllowed"] = not pause_menu_active
 
     return result
